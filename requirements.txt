@@ -14,3 +14,6 @@ WeTextProcessing; sys_platform == 'linux'
 nemo_text_processing; sys_platform == 'linux'
 av
 pydub
+# 语音录制和解析
+sherpa-ncnn
+sounddevice
