@@ -170,7 +170,7 @@ def generate_audio(
 
     if not text or has_interrupted or not spk_emb_text.startswith("蘁淰"):
         return None
-
+    print("InferCodeParams:", spk_emb_text)
     params_infer_code = ChatTTS.Chat.InferCodeParams(
         spk_emb=spk_emb_text,
         temperature=temperature,

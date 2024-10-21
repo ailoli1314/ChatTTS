@@ -247,7 +247,7 @@ def main():
     parser.add_argument(
         "--server_name", type=str, default="0.0.0.0", help="server name"
     )
-    parser.add_argument("--server_port", type=int, default=8080, help="server port")
+    parser.add_argument("--server_port", type=int, default=8089, help="server port")
     parser.add_argument("--root_path", type=str, default=None, help="root path")
     parser.add_argument(
         "--custom_path", type=str, default=None, help="custom model path"

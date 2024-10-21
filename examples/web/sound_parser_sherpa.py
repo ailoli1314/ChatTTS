@@ -1,5 +1,7 @@
 import sys
 import os
+import tts_sound_play
+from datetime import datetime
 
 try:
     import sounddevice as sd
@@ -29,6 +31,13 @@ def create_recognizer():
         joiner_param="./sherpa-ncnn-conv-emformer-transducer-2022-12-06/joiner_jit_trace-pnnx.ncnn.param",
         joiner_bin="./sherpa-ncnn-conv-emformer-transducer-2022-12-06/joiner_jit_trace-pnnx.ncnn.bin",
         num_threads=4,
+        decoding_method="modified_beam_search",
+        enable_endpoint_detection=True,
+        rule1_min_trailing_silence=2.4,
+        rule2_min_trailing_silence=1.2,
+        rule3_min_utterance_length=300,
+        hotwords_file="",
+        hotwords_score=1.5,
     )
     return recognizer
 
@@ -39,17 +48,26 @@ def main():
     sample_rate = recognizer.sample_rate
     samples_per_read = int(0.1 * sample_rate)  # 0.1 second = 100 ms
     last_result = ""
-    with sd.InputStream(
-            channels=1, dtype="float32", samplerate=sample_rate
-    ) as s:
+    segment_id = 0
+    with sd.InputStream(channels=1, dtype="float32", samplerate=sample_rate) as s:
         while True:
             samples, _ = s.read(samples_per_read)  # a blocking read
             samples = samples.reshape(-1)
             recognizer.accept_waveform(sample_rate, samples)
+
+            is_endpoint = recognizer.is_endpoint
+
             result = recognizer.text
-            if last_result != result:
-                last_result = result
-                print(result)
+            # if result and (last_result != result):
+            #     last_result = result
+            #     print("\r{}:{}:{}".format(segment_id, result, "|..."), end="", flush=True)
+            # print("\r{}|is_endpoint:{}|{}".format(datetime.now(), is_endpoint, result), flush=True)
+            if is_endpoint:
+                if result:
+                    print("\r{}|{}:{}".format(datetime.now(), segment_id, result), flush=True)
+                    segment_id += 1
+                recognizer.reset()
+                # tts_sound_play.synthesize_and_play(result)
 
 
 if __name__ == "__main__":
