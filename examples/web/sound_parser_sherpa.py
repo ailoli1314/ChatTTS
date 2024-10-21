@@ -2,6 +2,11 @@ import sys
 import os
 import tts_sound_play
 from datetime import datetime
+import threading
+import queue
+import webrtcvad
+import numpy as np
+
 
 try:
     import sounddevice as sd
@@ -15,6 +20,27 @@ except ImportError as e:
 
 import sherpa_ncnn
 
+# 创建一个队列用于管理任务
+task_queue = queue.Queue()
+
+# 工作线程从队列中获取任务并执行
+def worker():
+    while True:
+        task = task_queue.get()  # 从队列中取出任务
+        if task is None:
+            break  # 当任务为 None 时，退出线程
+        function, args = task
+        function(*args)  # 执行任务
+        task_queue.task_done()  # 标记任务完成
+
+# 初始化并启动工作线程
+worker_thread = threading.Thread(target=worker)
+worker_thread.start()
+
+# 在主线程中添加任务到队列
+def add_task_to_queue(result_array):
+    # 将合成和播放的任务加入队列，等待按顺序执行
+    task_queue.put((tts_sound_play.synthesize_and_play, (result_array,)))
 
 def create_recognizer():
     # Please replace the model files if needed.
@@ -44,30 +70,50 @@ def create_recognizer():
 
 def main():
     print("Started! Please speak")
+
+    # 创建语音识别器
     recognizer = create_recognizer()
-    sample_rate = recognizer.sample_rate
-    samples_per_read = int(0.1 * sample_rate)  # 0.1 second = 100 ms
+
+    # 设置采样率为 32000 Hz
+    sample_rate = 32000
+
+    # 创建 WebRTC VAD 并设置模式
+    vad = webrtcvad.Vad()
+    vad.set_mode(2)  # 模式0到3，数字越高，语音检测越严格
+
+    # 每次读取 10 ms 的音频样本
+    samples_per_read = int(0.01 * sample_rate)  # 320 个样本对应 10ms
     last_result = ""
     segment_id = 0
+
+    # 使用 `sd.InputStream` 创建一个音频输入流
     with sd.InputStream(channels=1, dtype="float32", samplerate=sample_rate) as s:
         while True:
-            samples, _ = s.read(samples_per_read)  # a blocking read
+            # 从输入流中读取样本，`samples_per_read` 指定读取的样本数
+            samples, _ = s.read(samples_per_read)
             samples = samples.reshape(-1)
-            recognizer.accept_waveform(sample_rate, samples)
 
-            is_endpoint = recognizer.is_endpoint
+            # 转换样本为 16-bit PCM 格式，因为 WebRTC VAD 要求此格式
+            pcm_data = (samples * 32768).astype(np.int16).tobytes()
 
-            result = recognizer.text
-            # if result and (last_result != result):
-            #     last_result = result
-            #     print("\r{}:{}:{}".format(segment_id, result, "|..."), end="", flush=True)
-            # print("\r{}|is_endpoint:{}|{}".format(datetime.now(), is_endpoint, result), flush=True)
-            if is_endpoint:
-                if result:
-                    print("\r{}|{}:{}".format(datetime.now(), segment_id, result), flush=True)
-                    segment_id += 1
-                recognizer.reset()
-                # tts_sound_play.synthesize_and_play(result)
+            # 确保音频帧长度为 10ms，防止帧长度不对引发错误
+            if len(pcm_data) == 640:  # 对应 32 kHz 的 20ms
+                # 判断当前音频是否包含语音
+                is_speech = vad.is_speech(pcm_data, sample_rate)
+
+                if is_speech:
+                    recognizer.accept_waveform(sample_rate, samples)
+                    is_endpoint = recognizer.is_endpoint
+                    result = recognizer.text
+
+                    if is_endpoint and result:
+                        print("\r{}|{}:{}".format(datetime.now(), segment_id, result), flush=True)
+                        segment_id += 1
+                        recognizer.reset()
+                        result_array = [result]
+
+                        # 如果需要，调用 TTS 系统
+                        add_task_to_queue(result_array)
 
 
 if __name__ == "__main__":

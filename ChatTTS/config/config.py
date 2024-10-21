@@ -73,7 +73,7 @@ class Embed:
 
 @dataclass(repr=False, eq=False)
 class FeatureExtractorInitArgs:
-    sample_rate: int = 24000
+    sample_rate: int = 32000
     n_fft: int = 1024
     hop_length: int = 256
     n_mels: int = 100
