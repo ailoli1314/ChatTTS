@@ -3,10 +3,10 @@ import os
 import tts_sound_play
 from datetime import datetime
 import threading
-import queue
 import webrtcvad
 import numpy as np
-
+import queue
+from tts_sound_play import TTSSoundPlay  # 导入 TTS 播报类
 
 try:
     import sounddevice as sd
@@ -20,33 +20,7 @@ except ImportError as e:
 
 import sherpa_ncnn
 
-# 创建一个队列用于管理任务
-task_queue = queue.Queue()
-
-# 工作线程从队列中获取任务并执行
-def worker():
-    while True:
-        task = task_queue.get()  # 从队列中取出任务
-        if task is None:
-            break  # 当任务为 None 时，退出线程
-        function, args = task
-        function(*args)  # 执行任务
-        task_queue.task_done()  # 标记任务完成
-
-# 初始化并启动工作线程
-worker_thread = threading.Thread(target=worker)
-worker_thread.start()
-
-# 在主线程中添加任务到队列
-def add_task_to_queue(result_array):
-    # 将合成和播放的任务加入队列，等待按顺序执行
-    task_queue.put((tts_sound_play.synthesize_and_play, (result_array,)))
-
 def create_recognizer():
-    # Please replace the model files if needed.
-    # See https://k2-fsa.github.io/sherpa/ncnn/pretrained_models/index.html
-    # for download links.
-    # 打印当前工作目录
     print("Current Working Directory:", os.getcwd())
     recognizer = sherpa_ncnn.Recognizer(
         tokens="./sherpa-ncnn-conv-emformer-transducer-2022-12-06/tokens.txt",
@@ -83,7 +57,6 @@ def main():
 
     # 每次读取 10 ms 的音频样本
     samples_per_read = int(0.01 * sample_rate)  # 320 个样本对应 10ms
-    last_result = ""
     segment_id = 0
 
     # 使用 `sd.InputStream` 创建一个音频输入流
@@ -112,8 +85,29 @@ def main():
                         recognizer.reset()
                         result_array = [result]
 
-                        # 如果需要，调用 TTS 系统
-                        add_task_to_queue(result_array)
+                        # 启动任务生成线程
+                        producer_thread = threading.Thread(target=task_producer, args=(result_array,))
+                        producer_thread.start()
+
+# 创建任务队列
+play_queue = queue.Queue()
+# 播报线程：从队列中取出音频数据并按顺序播放
+def play_worker():
+    while True:
+        task = play_queue.get()  # 从队列中取出任务
+        if task is None:
+            break  # 如果收到 None 任务，结束线程
+        audio_data, samplerate = task
+        sd.play(audio_data, samplerate)  # 播放音频
+        sd.wait()  # 等待播放完成
+        play_queue.task_done()
+# 启动播报线程
+play_thread = threading.Thread(target=play_worker)
+play_thread.start()
+# 创建 TTS 播报对象
+tts_sound_play = TTSSoundPlay(play_queue)  # 传入队列
+def task_producer(text):
+    tts_sound_play.synthesize_and_queue(text)  # 生成音频并放入队列
 
 
 if __name__ == "__main__":
@@ -126,3 +120,4 @@ if __name__ == "__main__":
         main()
     except Exception as e:
         print(f"Error: {e}")
+    play_thread.join()
